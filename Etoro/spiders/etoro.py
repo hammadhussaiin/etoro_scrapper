@@ -10,7 +10,11 @@ def calculate_instrument_type():
         user_trading_data = json.loads(f.read())
     with open('merge_dicts.json', 'r') as f:
         instrument_type_merged = json.loads(f.read())
-    result = user_trading_data['all']
+    result = dict()
+    result['winRatio'] = user_trading_data['all']['winRatio']
+    result['totalTrades'] = user_trading_data['all']['totalTrades']
+    result['avgProfitPct'] = user_trading_data['all']['avgProfitPct']
+    result['avgLossPct'] = user_trading_data['all']['avgLossPct']
     calculations = {}
     for item in user_trading_data['assets']:
         if calculations.get(instrument_type_merged[str(item['instrumentId'])]) is None:
@@ -62,7 +66,6 @@ class EtoroSpider(scrapy.Spider):
 
 
     def parse_url(self, url, number):
-        calculate_instrument_type()
         if 'verified' in url:
             url = url.replace('verified', 'verified=true')
         if 'hasavatar' in url:
