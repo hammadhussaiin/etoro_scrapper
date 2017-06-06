@@ -3,16 +3,40 @@ import scrapy
 import urlparse
 from urllib import urlencode
 import json
+import math
 
+def calculate_instrument_type():
+    with open('data.json', 'r') as f:
+        user_trading_data = json.loads(f.read())
+    with open('merge_dicts.json', 'r') as f:
+        instrument_type_merged = json.loads(f.read())
+    result = user_trading_data['all']
+    calculations = {}
+    for item in user_trading_data['assets']:
+        if calculations.get(instrument_type_merged[str(item['instrumentId'])]) is None:
+            calculations[instrument_type_merged[str(item['instrumentId'])]] = 0
+        calculations[instrument_type_merged[str(item['instrumentId'])]] += item['totalTrades']
 
-def intersect_instrument_instrument_type(instrument_dict, instrument_type_dict):
+    for item in calculations:
+        calculations[item] = round(((float(calculations[item]) / result['totalTrades']) * 100),2)
+
+    result['calculations'] = calculations
+    with open('user_trading_data.json', 'w') as f:
+        json.dump(result, f)
+
+def intersect_instrument_instrument_type():
     result = dict()
+    with open('instrument_id.json', 'r') as f:
+        instrument_dict = json.loads(f.read())
+    with open('instrument_details.json', 'r') as f:
+        instrument_type_dict = json.loads(f.read())
     for item in instrument_dict['InstrumentDisplayDatas']:
         for sub_item in instrument_type_dict['InstrumentTypes']:
             if item['InstrumentTypeID'] == sub_item['InstrumentTypeID']:
                 result[str(item['InstrumentID'])] = sub_item['InstrumentTypeDescription']
                 break
-    return result
+    with open('merge_dicts.json', 'w') as f:
+        json.dump(result, f)
 
 class EtoroSpider(scrapy.Spider):
     name = 'etoro'
@@ -38,6 +62,7 @@ class EtoroSpider(scrapy.Spider):
 
 
     def parse_url(self, url, number):
+        calculate_instrument_type()
         if 'verified' in url:
             url = url.replace('verified', 'verified=true')
         if 'hasavatar' in url:
