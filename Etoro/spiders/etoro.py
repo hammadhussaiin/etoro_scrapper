@@ -5,6 +5,15 @@ from urllib import urlencode
 import json
 
 
+def intersect_instrument_instrument_type(instrument_dict, instrument_type_dict):
+    result = dict()
+    for item in instrument_dict['InstrumentDisplayDatas']:
+        for sub_item in instrument_type_dict['InstrumentTypes']:
+            if item['InstrumentTypeID'] == sub_item['InstrumentTypeID']:
+                result[str(item['InstrumentID'])] = sub_item['InstrumentTypeDescription']
+                break
+    return result
+
 class EtoroSpider(scrapy.Spider):
     name = 'etoro'
     download_delay = 5.0
