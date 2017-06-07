@@ -49,7 +49,7 @@ class EtoroSpider(scrapy.Spider):
         request.meta['instrument_types'] = response.meta['instrument_types']
         yield request
 
-    def parse_url(self, url, number):git
+    def parse_url(self, url, number):
         if 'verified' in url:
             url = url.replace('verified', 'verified=true')
         if 'hasavatar' in url:
