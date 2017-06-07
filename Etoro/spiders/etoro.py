@@ -83,7 +83,6 @@ class EtoroSpider(scrapy.Spider):
         avg_holding_time = self.avg_holding_time_clean(trades['all']['avgHoldingTimeInMinutes'])
         trading_data_complete = self.calculate_instrument_type(trades, instrument_cats)
 
-
     def monthly_data_clean(self, data):
         months = {'01': 'January', '02': 'February', '03': 'March', '04': 'April', '05': 'May',
                   '06': 'June', '07': 'July', '08': 'August', '09': 'September', '10': 'October',
@@ -144,6 +143,15 @@ class EtoroSpider(scrapy.Spider):
             return str(int(x) + 0.5) + unit
         else:
             return str(int(x)) + unit
+
+    def clean_intstrument_dict(self):
+        with open('instrument_id.json', 'r') as f:
+            instrument_type_dict = json.loads(f.read())
+        result = {}
+        for items in instrument_type_dict['InstrumentDisplayDatas']:
+            result[items['InstrumentID']] = items['InstrumentDisplayName']
+        with open('istrument_with_display_names.json', 'w') as f:
+            json.dump(result, f)
 
     def calculate_instrument_type(self, user_trading_data, instrument_type_merged):
         result = dict()
