@@ -49,7 +49,7 @@ class EtoroSpider(scrapy.Spider):
         request.meta['instrument_types'] = response.meta['instrument_types']
         yield request
 
-    def parse_url(self, url, number):
+    def parse_url(self, url, number):git
         if 'verified' in url:
             url = url.replace('verified', 'verified=true')
         if 'hasavatar' in url:
@@ -161,9 +161,14 @@ class EtoroSpider(scrapy.Spider):
         result['avgLossPct'] = user_trading_data['all']['avgLossPct']
         calculations = {}
         for item in user_trading_data['assets']:
-            if calculations.get(instrument_type_merged[str(item['instrumentId'])]) is None:
-                calculations[instrument_type_merged[str(item['instrumentId'])]] = 0
-            calculations[instrument_type_merged[str(item['instrumentId'])]] += item['totalTrades']
+            if item.get('userName') is None:
+                if calculations.get(instrument_type_merged[str(item['instrumentId'])]) is None:
+                    calculations[instrument_type_merged[str(item['instrumentId'])]] = 0
+                calculations[instrument_type_merged[str(item['instrumentId'])]] += item['totalTrades']
+            else:
+                if calculations.get('people') is None:
+                    calculations['people'] = 0
+                calculations['people'] += item['totalTrades']
 
         for item in calculations:
             calculations[item] = round(((float(calculations[item]) / result['totalTrades']) * 100), 2)
