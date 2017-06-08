@@ -3,6 +3,8 @@ import scrapy
 import urlparse
 import urllib
 import json
+import time
+from Etoro.items import EtoroItem
 
 
 class EtoroSpider(scrapy.Spider):
@@ -22,9 +24,11 @@ class EtoroSpider(scrapy.Spider):
         instruments = json.loads(
             urllib.urlopen('https://api.etorostatic.com/sapi/instrumentsmetadata/V1.1/instruments').read())
         instrument_cats = self.intersect_instrument_instrument_type(instruments, instruments_type)
+        instrument_names = self.clean_intstrument_dict(instruments)
         for user in item_dict['Items']:
             request = scrapy.Request('https://www.etoro.com/sapi/rankings/cid/{}/rankings/?Period=OneYearAgo'.format(user['CustomerId']), callback=self.parse_user_latest_data)
             request.meta['instrument_types'] = instrument_cats
+            request.meta['instrument_names'] = instrument_names
             yield request
 
     def parse_user_latest_data(self, response):
@@ -32,6 +36,7 @@ class EtoroSpider(scrapy.Spider):
         request = scrapy.Request('https://www.etoro.com/sapi/userstats/gain/cid/{}/history?IncludeSimulation=true&'.format(
             user_data['CustomerId']), callback=self.parse_monthly_data)
         request.meta['user_data'] = user_data
+        request.meta['instrument_names'] = response.meta['instrument_names']
         request.meta['instrument_types'] = response.meta['instrument_types']
         yield request
 
@@ -47,6 +52,7 @@ class EtoroSpider(scrapy.Spider):
         request.meta['profile_url'] = 'https://www.etoro.com/people/{}/stats'.format(user_data['UserName'])
         request.meta['Active_since'] = data['monthly'][0]['start'].split('T')[0]
         request.meta['instrument_types'] = response.meta['instrument_types']
+        request.meta['instrument_names'] = response.meta['instrument_names']
         yield request
 
     def parse_url(self, url, number):
@@ -71,6 +77,7 @@ class EtoroSpider(scrapy.Spider):
         request.meta['Active_since'] = response.meta['Active_since']
         request.meta['average_risk'] = average_risk
         request.meta['instrument_types'] = response.meta['instrument_types']
+        request.meta['instrument_names'] = response.meta['instrument_names']
         yield request
 
     def parse_trading_info(self, response):
@@ -78,10 +85,32 @@ class EtoroSpider(scrapy.Spider):
         trades = json.loads(response.body)
         tradesperweek = float(trades['all']['totalTrades'])/float(response.meta['user_data']['ActiveWeeks'])
         tradesperweek = round(tradesperweek, 2)
-        url = response.meta['profile_url']
+        active_since = response.meta['Active_since']
         profitable_weeks = response.meta['user_data']['ProfitableWeeksPct']
         avg_holding_time = self.avg_holding_time_clean(trades['all']['avgHoldingTimeInMinutes'])
         trading_data_complete = self.calculate_instrument_type(trades, instrument_cats)
+        request = scrapy.Request(
+            'https://www.etoro.com/sapi/trade-data-real/live/public/portfolios?cid={}&format=json'.
+            format(response.meta['user_data']['CustomerId']), callback=self.parse_portfolio)
+        request.meta['instrument_names'] = response.meta['instrument_names']
+        request.meta['user_data'] = response.meta['user_data']
+        item = EtoroItem()
+        item['username'] = response.meta['user_data']['UserName']
+        item['profile_url'] = response.meta['profile_url']
+        item['performance_yearly'] = response.meta['performance_yearly']
+        item['trading_stats'] = trading_data_complete
+        item['additional_stats'] = {'trades_per_week': tradesperweek, 'profitable_weeks': profitable_weeks,
+                                            'avg_holding_time': avg_holding_time,
+                                            'active_since': active_since}
+        request.meta['item'] = item
+        yield request
+
+    def parse_portfolio(self, response):
+        items = self.get_trading_items(json.loads(response.body),
+                                       response.meta['instrument_names'], response.meta['user_data']['CustomerId'])
+        item = response.meta['item']
+        item['items'] = items
+        yield item
 
     def monthly_data_clean(self, data):
         months = {'01': 'January', '02': 'February', '03': 'March', '04': 'April', '05': 'May',
@@ -144,14 +173,11 @@ class EtoroSpider(scrapy.Spider):
         else:
             return str(int(x)) + unit
 
-    def clean_intstrument_dict(self):
-        with open('instrument_id.json', 'r') as f:
-            instrument_type_dict = json.loads(f.read())
+    def clean_intstrument_dict(self, instrument_type_dict):
         result = {}
         for items in instrument_type_dict['InstrumentDisplayDatas']:
             result[items['InstrumentID']] = items['InstrumentDisplayName']
-        with open('istrument_with_display_names.json', 'w') as f:
-            json.dump(result, f)
+        return result
 
     def calculate_instrument_type(self, user_trading_data, instrument_type_merged):
         result = dict()
@@ -161,12 +187,83 @@ class EtoroSpider(scrapy.Spider):
         result['avgLossPct'] = user_trading_data['all']['avgLossPct']
         calculations = {}
         for item in user_trading_data['assets']:
-            if calculations.get(instrument_type_merged[str(item['instrumentId'])]) is None:
-                calculations[instrument_type_merged[str(item['instrumentId'])]] = 0
-            calculations[instrument_type_merged[str(item['instrumentId'])]] += item['totalTrades']
+            if item.get('userName') is None:
+                if calculations.get(instrument_type_merged[str(item['instrumentId'])]) is None:
+                    calculations[instrument_type_merged[str(item['instrumentId'])]] = 0
+                calculations[instrument_type_merged[str(item['instrumentId'])]] += item['totalTrades']
+            else:
+                if calculations.get('people') is None:
+                    calculations['people'] = 0
+                calculations['people'] += item['totalTrades']
 
         for item in calculations:
             calculations[item] = round(((float(calculations[item]) / result['totalTrades']) * 100), 2)
 
         result['calculations'] = calculations
+        return result
+
+    def get_trading_items(self, data, instrument_names, cid):
+        result = {}
+        for item in data['AggregatedPositions']:
+            name = instrument_names[item['InstrumentID']]
+            instrument_id = item['InstrumentID']
+            del item['InstrumentID']
+            item['NetProfit'] = round(item['NetProfit'], 2)
+            item['Value'] = round(item['Value'], 2)
+            item['Invested'] = round(item['Invested'], 2)
+            result.update({name: item})
+            url = 'https://www.etoro.com/sapi/trade-data-real/live/public/positions?InstrumentID={}&cid={}&format=json'.format(
+                instrument_id, cid)
+            time.sleep(5)
+            call_result = json.loads(urllib.urlopen(url).read())
+            result_items = []
+            for element in call_result['PublicPositions']:
+                element_name = 'BUY ' if element['IsBuy'] else 'SELL '
+                element_name += instrument_names[element['InstrumentID']]
+                element.update({'element': element_name})
+                del element['InstrumentID']
+                del element['Leverage']
+                del element['IsTslEnabled']
+                del element['ParentPositionID']
+                del element['MirrorID']
+                del element['StopLossRate']
+                del element['TakeProfitRate']
+                del element['IsBuy']
+                del element['OpenDateTime']
+                del element['CID']
+                del element['PositionID']
+                result_items.append(element)
+            result[name].update({'item_details': result_items})
+        for item in data['AggregatedMirrors']:
+            name = item['ParentUsername']
+            mirror_id = item['MirrorID']
+            del item['MirrorID']
+            del item['ParentCID']
+            del item['ParentUsername']
+            del item['PendingForClosure']
+            item['NetProfit'] = round(item['NetProfit'], 2)
+            item['Value'] = round(item['Value'], 2)
+            item['Invested'] = round(item['Invested'], 2)
+            result.update({name: item})
+            url = 'https://www.etoro.com/sapi/trade-data-real/live/public/mirrors/{}?format=json'.format(mirror_id)
+            time.sleep(5)
+            call_result = json.loads(urllib.urlopen(url).read())
+            result_items = []
+            for element in call_result['PublicMirror']['Positions']:
+                element_name = 'BUY ' if element['IsBuy'] else 'SELL '
+                element_name += instrument_names[element['InstrumentID']]
+                element.update({'element': element_name})
+                del element['InstrumentID']
+                del element['Leverage']
+                del element['IsTslEnabled']
+                del element['ParentPositionID']
+                del element['MirrorID']
+                del element['StopLossRate']
+                del element['TakeProfitRate']
+                del element['IsBuy']
+                del element['OpenDateTime']
+                del element['CID']
+                del element['PositionID']
+                result_items.append(element)
+            result[name].update({'item_details' : result_items})
         return result
