@@ -1,1 +1,1 @@
-Input the url and the number of people that you need to fetch
+Scrapping the Search URL for etroro.com and it results all search results in a JSON file
